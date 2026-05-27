@@ -1,6 +1,8 @@
 #!/bin/bash
 
-set -e
+# YARICK Arch Linux Setup Script
+# Author: Gemini CLI
+# Date: 2026-05-27
 
 # Colors
 GREEN='\033[0;32m'
@@ -14,32 +16,32 @@ STATE_FILE="$SCRIPT_DIR/.install_state"
 MODULES_DIR="$SCRIPT_DIR/modules"
 
 log() {
-  echo -e "${BLUE}[INFO]${NC} $1"
+    echo -e "${BLUE}[INFO]${NC} $1"
 }
 
 warn() {
-  echo -e "${YELLOW}[WARN]${NC} $1"
+    echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
 error() {
-  echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1"
 }
 
 success() {
-  echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
 # Check if state file exists, if not create it
 if [ ! -f "$STATE_FILE" ]; then
-  touch "$STATE_FILE"
+    touch "$STATE_FILE"
 fi
 
 is_step_done() {
-  grep -q "^$1$" "$STATE_FILE"
+    grep -q "^$1$" "$STATE_FILE"
 }
 
 mark_step_done() {
-  echo "$1" >>"$STATE_FILE"
+    echo "$1" >> "$STATE_FILE"
 }
 
 # Header
@@ -53,14 +55,20 @@ echo -e "${NC}"
 echo "Welcome to the YARICK Arch Setup!"
 echo "----------------------------------------"
 
-# Check for sudo
-if [[ $EUID -ne 0 ]]; then
-   echo "This script will ask for your password for sudo tasks."
+# Sudo persistence: Ask for password once and keep it alive
+echo "Please provide sudo password to initialize persistent session."
+sudo -v
+if [ $? -ne 0 ]; then
+    error "Sudo authentication failed. Exiting."
+    exit 1
 fi
+
+# Keep-alive sudo session in the background
+(while true; do sudo -n v; sleep 60; kill -0 "$$" || exit; done) 2>/dev/null &
 
 # Function to ask for confirmation
 confirm() {
-    read -p "$1 (Y/n): " choice
+    read -rp "$1 (Y/n): " choice
     case "$choice" in 
       n|N ) return 1;;
       * ) return 0;;
@@ -80,30 +88,41 @@ MODULES=(
     "09_terminal.sh"
     "10_neovim.sh"
 )
+
 echo "Ready to begin the installation. You can choose which steps to run."
 
 for module in "${MODULES[@]}"; do
-  module_path="$MODULES_DIR/$module"
-  module_name=$(basename "$module" .sh)
-
-  if is_step_done "$module_name"; then
-    log "Step $module_name is already marked as completed in state file. Skipping..."
-    continue
-  fi
-
-  if confirm "Run step: $module_name?"; then
-    echo -e "\n${YELLOW}>>> Running $module_name...${NC}"
-    if [ -f "$module_path" ]; then
-      bash "$module_path"
-      mark_step_done "$module_name"
-      success "$module_name completed!"
-    else
-      error "Module $module_path not found!"
-      exit 1
+    module_path="$MODULES_DIR/$module"
+    module_name=$(basename "$module" .sh)
+    
+    if is_step_done "$module_name"; then
+        log "Step $module_name is already marked as completed. Skipping..."
+        continue
     fi
-  else
-    log "Skipping $module_name."
-  fi
+    
+    if confirm "Run step: $module_name?"; then
+        echo -e "\n${YELLOW}>>> Running $module_name...${NC}"
+        if [ -f "$module_path" ]; then
+            # Run module and capture exit code
+            if bash "$module_path"; then
+                mark_step_done "$module_name"
+                success "$module_name completed successfully."
+            else
+                error "Step $module_name failed."
+                if ! confirm "Do you want to continue to the next step anyway?"; then
+                    error "Installation aborted by user."
+                    exit 1
+                fi
+            fi
+        else
+            error "Module $module_path not found!"
+            if ! confirm "Skip this missing module and continue?"; then
+                exit 1
+            fi
+        fi
+    else
+        log "Skipping $module_name."
+    fi
 done
 
-success "All installation steps completed! Please reboot your system."
+success "All selected installation steps processed. Please reboot your system."
